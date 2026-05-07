@@ -16,8 +16,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
-    # ── Anthropic ────────────────────────────────────────────
+    # ── Anthropic / Gemini API ───────────────────────────────
     anthropic_api_key: str = ""
+    gemini_api_key: str = ""
 
     # ── Optional enrichment APIs ─────────────────────────────
     shodan_api_key: str = ""

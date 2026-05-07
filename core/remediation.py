@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import anthropic
+from google import genai
 
 from utils.config import settings
 from utils.helpers import get_logger, utcnow_str, cvss_to_severity
@@ -192,12 +193,16 @@ class RemediationEngine:
 
     def __init__(self):
         self.client: Optional[anthropic.AsyncAnthropic] = None
-        if settings.anthropic_api_key:
+        self.gemini_client = None
+        
+        if settings.gemini_api_key:
+            self.gemini_client = genai.Client(api_key=settings.gemini_api_key)
+        elif settings.anthropic_api_key:
             self.client = anthropic.AsyncAnthropic(
                 api_key=settings.anthropic_api_key
             )
         else:
-            logger.warning("[remediation] No ANTHROPIC_API_KEY – AI disabled")
+            logger.warning("[remediation] No GEMINI_API_KEY or ANTHROPIC_API_KEY – AI disabled")
 
     # ── Main entry points ─────────────────────────────────────
 
@@ -269,7 +274,7 @@ class RemediationEngine:
         version = vulnerability.get("version", "")
         os_context = vulnerability.get("os", "Linux/Ubuntu")
 
-        if self.client:
+        if self.client or self.gemini_client:
             playbook = await self._ai_generate_playbook(
                 vuln_id=vuln_id,
                 vuln_name=vuln_name,
@@ -333,13 +338,24 @@ class RemediationEngine:
         )
 
         try:
-            message = await self.client.messages.create(
-                model=settings.ai_model,
-                max_tokens=settings.ai_max_tokens,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = message.content[0].text
+            raw = ""
+            if self.gemini_client:
+                full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}"
+                response = await asyncio.to_thread(
+                    self.gemini_client.models.generate_content,
+                    model="gemini-2.5-flash",
+                    contents=full_prompt
+                )
+                raw = response.text
+            elif self.client:
+                message = await self.client.messages.create(
+                    model=settings.ai_model,
+                    max_tokens=settings.ai_max_tokens,
+                    system=SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                raw = message.content[0].text
+                
             return self._parse_ai_response(
                 raw, vuln_id, vuln_name, cves, severity,
                 host, port, service, os_context
